@@ -1,5 +1,6 @@
 package com.roubao.autopilot
 
+import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.widget.Toast
@@ -9,6 +10,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.activity.compose.BackHandler
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -37,6 +39,7 @@ import androidx.core.view.WindowCompat
 import com.roubao.autopilot.vlm.GUIOwlClient
 import com.roubao.autopilot.vlm.MAIUIClient
 import com.roubao.autopilot.vlm.VLMClient
+import com.roubao.autopilot.voice.VoiceAgent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import rikka.shizuku.Shizuku
@@ -69,11 +72,26 @@ class MainActivity : ComponentActivity() {
     // 是否正在执行（点击发送后立即为 true）
     private val isExecuting = mutableStateOf(false)
 
+    // 语音助手
+    private var voiceAgent: VoiceAgent? = null
+    private var pendingVoiceEnable = false
+
     // 当前执行的记录 ID（用于停止后跳转）
     private val currentRecordId = mutableStateOf<String?>(null)
 
     // 是否需要跳转到记录详情（悬浮窗停止后触发）
     private val shouldNavigateToRecord = mutableStateOf(false)
+
+    private val requestAudioPermission = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted && pendingVoiceEnable && ::settingsManager.isInitialized) {
+            settingsManager.updateVoiceEnabled(true)
+        } else if (!granted) {
+            Toast.makeText(this, "Microphone permission required for voice agent", Toast.LENGTH_LONG).show()
+        }
+        pendingVoiceEnable = false
+    }
 
     private val binderReceivedListener = Shizuku.OnBinderReceivedListener {
         Log.d(TAG, "Shizuku binder received")
@@ -113,6 +131,7 @@ class MainActivity : ComponentActivity() {
         deviceController.setCacheDir(cacheDir)
         settingsManager = SettingsManager(this)
         executionRepository = ExecutionRepository(this)
+        voiceAgent = VoiceAgent(this)
 
         // 加载执行记录
         lifecycleScope.launch {
@@ -198,6 +217,28 @@ class MainActivity : ComponentActivity() {
             if (!isShizukuAvailable && settings.hasSeenOnboarding && !hasShownShizukuHelp) {
                 hasShownShizukuHelp = true
                 showShizukuHelpDialog = true
+            }
+        }
+
+        // Voice agent lifecycle
+        LaunchedEffect(
+            settings.voiceEnabled,
+            settings.voiceApiKey,
+            settings.voiceBaseUrl,
+            settings.voiceModel,
+            settings.ttsBaseUrl,
+            settings.ttsApiKey,
+            settings.ttsVoiceId
+        ) {
+            if (settings.voiceEnabled) {
+                if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                    settingsManager.updateVoiceEnabled(false)
+                    Toast.makeText(this@MainActivity, "Microphone permission required", Toast.LENGTH_LONG).show()
+                } else {
+                    voiceAgent?.start(settings)
+                }
+            } else {
+                voiceAgent?.stop()
             }
         }
 
@@ -312,6 +353,30 @@ class MainActivity : ComponentActivity() {
                                 onUpdateRootModeEnabled = { settingsManager.updateRootModeEnabled(it) },
                                 onUpdateSuCommandEnabled = { settingsManager.updateSuCommandEnabled(it) },
                                 onSelectProvider = { settingsManager.selectProvider(it) },
+                                onUpdateVoiceEnabled = { enabled ->
+                                    if (enabled) {
+                                        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                                            settingsManager.updateVoiceEnabled(true)
+                                        } else {
+                                            pendingVoiceEnable = true
+                                            requestAudioPermission.launch(Manifest.permission.RECORD_AUDIO)
+                                        }
+                                    } else {
+                                        settingsManager.updateVoiceEnabled(false)
+                                    }
+                                },
+                                onSelectVoiceProvider = { settingsManager.selectVoiceProvider(it) },
+                                onUpdateVoiceApiKey = { settingsManager.updateVoiceApiKey(it) },
+                                onUpdateVoiceBaseUrl = { settingsManager.updateVoiceBaseUrl(it) },
+                                onUpdateVoiceModel = { settingsManager.updateVoiceModel(it) },
+                                onUpdateBanglishEnabled = { settingsManager.updateBanglishEnabled(it) },
+                                onUpdateIdleCheckinEnabled = { settingsManager.updateIdleCheckinEnabled(it) },
+                                onUpdateIdleCheckinSeconds = { settingsManager.updateIdleCheckinSeconds(it) },
+                                onUpdateIdleCheckinMessage = { settingsManager.updateIdleCheckinMessage(it) },
+                                onUpdateTtsProvider = { settingsManager.updateTtsProvider(it) },
+                                onUpdateTtsApiKey = { settingsManager.updateTtsApiKey(it) },
+                                onUpdateTtsVoiceId = { settingsManager.updateTtsVoiceId(it) },
+                                onUpdateTtsBaseUrl = { settingsManager.updateTtsBaseUrl(it) },
                                 shizukuAvailable = isShizukuAvailable,
                                 shizukuPrivilegeLevel = if (isShizukuAvailable) {
                                     when (deviceController.getShizukuPrivilegeLevel()) {
@@ -355,6 +420,7 @@ class MainActivity : ComponentActivity() {
         Shizuku.removeBinderReceivedListener(binderReceivedListener)
         Shizuku.removeBinderDeadListener(binderDeadListener)
         Shizuku.removeRequestPermissionResultListener(permissionResultListener)
+        voiceAgent?.stop()
         deviceController.unbindService()
     }
 

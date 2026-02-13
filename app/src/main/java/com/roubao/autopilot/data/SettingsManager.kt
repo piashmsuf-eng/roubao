@@ -62,6 +62,72 @@ data class ApiProvider(
 }
 
 /**
+ * 语音对话 LLM 服务商配置
+ */
+data class VoiceProvider(
+    val id: String,
+    val name: String,
+    val baseUrl: String,
+    val defaultModel: String
+) {
+    companion object {
+        val GROQ = VoiceProvider(
+            id = "groq",
+            name = "Groq",
+            baseUrl = "https://api.groq.com/openai/v1",
+            defaultModel = "llama-3.1-70b-versatile"
+        )
+        val OPENAI = VoiceProvider(
+            id = "openai",
+            name = "OpenAI",
+            baseUrl = "https://api.openai.com/v1",
+            defaultModel = "gpt-4o"
+        )
+        val LETTA = VoiceProvider(
+            id = "letta",
+            name = "Letta AI",
+            baseUrl = "",
+            defaultModel = ""
+        )
+        val FREEDOMGPT = VoiceProvider(
+            id = "freedomgpt",
+            name = "FreedomGPT",
+            baseUrl = "",
+            defaultModel = ""
+        )
+        val OPENCODE = VoiceProvider(
+            id = "opencode",
+            name = "OpenCode",
+            baseUrl = "",
+            defaultModel = ""
+        )
+        val CUSTOM = VoiceProvider(
+            id = "custom",
+            name = "自定义",
+            baseUrl = "",
+            defaultModel = ""
+        )
+
+        val ALL = listOf(GROQ, OPENAI, LETTA, FREEDOMGPT, OPENCODE, CUSTOM)
+    }
+}
+
+/**
+ * 语音 TTS 提供商
+ */
+data class TtsProvider(
+    val id: String,
+    val name: String
+) {
+    companion object {
+        val CARTESIA = TtsProvider("cartesia", "Cartesia")
+        val SPEECHIFY = TtsProvider("speechify", "Speechify")
+        val CUSTOM = TtsProvider("custom", "自定义")
+        val ALL = listOf(CARTESIA, SPEECHIFY, CUSTOM)
+    }
+}
+
+/**
  * 服务商配置（每个服务商独立保存）
  */
 data class ProviderConfig(
@@ -87,7 +153,20 @@ data class AppSettings(
     val maxSteps: Int = 25,
     val cloudCrashReportEnabled: Boolean = true,
     val rootModeEnabled: Boolean = false,
-    val suCommandEnabled: Boolean = false
+    val suCommandEnabled: Boolean = false,
+
+    // Voice agent settings
+    val voiceEnabled: Boolean = false,
+    val voiceProviderId: String = VoiceProvider.GROQ.id,
+    val voiceProviderConfigs: Map<String, ProviderConfig> = emptyMap(),
+    val banglishEnabled: Boolean = true,
+    val idleCheckinEnabled: Boolean = true,
+    val idleCheckinSeconds: Int = 45,
+    val idleCheckinMessage: String = "Ki holo Boss, kichu bolcho na… tomar kichu lagbe?",
+    val ttsProviderId: String = TtsProvider.CARTESIA.id,
+    val ttsApiKey: String = "",
+    val ttsVoiceId: String = "",
+    val ttsBaseUrl: String = ""
 ) {
     // 便捷属性：获取当前服务商的配置
     val currentConfig: ProviderConfig
@@ -107,6 +186,17 @@ data class AppSettings(
             currentProviderId == "mai_ui" && currentConfig.customBaseUrl.isNotEmpty() -> currentConfig.customBaseUrl
             else -> currentProvider.baseUrl
         }
+
+    val currentVoiceConfig: ProviderConfig
+        get() = voiceProviderConfigs[voiceProviderId] ?: ProviderConfig()
+
+    val currentVoiceProvider: VoiceProvider
+        get() = VoiceProvider.ALL.find { it.id == voiceProviderId } ?: VoiceProvider.GROQ
+
+    val voiceApiKey: String get() = currentVoiceConfig.apiKey
+    val voiceModel: String get() = currentVoiceConfig.model.ifEmpty { currentVoiceProvider.defaultModel }
+    val voiceBaseUrl: String
+        get() = if (currentVoiceProvider.baseUrl.isNotBlank()) currentVoiceProvider.baseUrl else currentVoiceConfig.customBaseUrl
 }
 
 /**
@@ -179,6 +269,13 @@ class SettingsManager(context: Context) {
             providerConfigs[provider.id] = config
         }
 
+        // 加载语音服务商配置
+        val voiceProviderConfigs = mutableMapOf<String, ProviderConfig>()
+        for (provider in VoiceProvider.ALL) {
+            val config = loadVoiceProviderConfig(provider.id)
+            voiceProviderConfigs[provider.id] = config
+        }
+
         // 迁移旧数据（如果有）
         val oldApiKey = securePrefs.getString("api_key", null)
         val oldModel = prefs.getString("model", null)
@@ -224,7 +321,20 @@ class SettingsManager(context: Context) {
             maxSteps = prefs.getInt("max_steps", 25),
             cloudCrashReportEnabled = prefs.getBoolean("cloud_crash_report_enabled", true),
             rootModeEnabled = prefs.getBoolean("root_mode_enabled", false),
-            suCommandEnabled = prefs.getBoolean("su_command_enabled", false)
+            suCommandEnabled = prefs.getBoolean("su_command_enabled", false),
+
+            voiceEnabled = prefs.getBoolean("voice_enabled", false),
+            voiceProviderId = prefs.getString("voice_provider_id", VoiceProvider.GROQ.id) ?: VoiceProvider.GROQ.id,
+            voiceProviderConfigs = voiceProviderConfigs,
+            banglishEnabled = prefs.getBoolean("voice_banglish_enabled", true),
+            idleCheckinEnabled = prefs.getBoolean("voice_idle_checkin_enabled", true),
+            idleCheckinSeconds = prefs.getInt("voice_idle_checkin_seconds", 45),
+            idleCheckinMessage = prefs.getString("voice_idle_checkin_message", "Ki holo Boss, kichu bolcho na… tomar kichu lagbe?")
+                ?: "Ki holo Boss, kichu bolcho na… tomar kichu lagbe?",
+            ttsProviderId = prefs.getString("tts_provider_id", TtsProvider.CARTESIA.id) ?: TtsProvider.CARTESIA.id,
+            ttsApiKey = securePrefs.getString("tts_api_key", "") ?: "",
+            ttsVoiceId = prefs.getString("tts_voice_id", "") ?: "",
+            ttsBaseUrl = prefs.getString("tts_base_url", "") ?: ""
         )
     }
 
@@ -255,6 +365,32 @@ class SettingsManager(context: Context) {
     }
 
     /**
+     * 加载语音服务商配置
+     */
+    private fun loadVoiceProviderConfig(providerId: String): ProviderConfig {
+        val prefix = "voice_provider_${providerId}_"
+        return ProviderConfig(
+            apiKey = securePrefs.getString("${prefix}api_key", "") ?: "",
+            model = prefs.getString("${prefix}model", "") ?: "",
+            cachedModels = prefs.getStringSet("${prefix}cached_models", emptySet())?.toList() ?: emptyList(),
+            customBaseUrl = prefs.getString("${prefix}custom_base_url", "") ?: ""
+        )
+    }
+
+    /**
+     * 保存语音服务商配置
+     */
+    private fun saveVoiceProviderConfig(providerId: String, config: ProviderConfig) {
+        val prefix = "voice_provider_${providerId}_"
+        securePrefs.edit().putString("${prefix}api_key", config.apiKey).apply()
+        prefs.edit()
+            .putString("${prefix}model", config.model)
+            .putStringSet("${prefix}cached_models", config.cachedModels.toSet())
+            .putString("${prefix}custom_base_url", config.customBaseUrl)
+            .apply()
+    }
+
+    /**
      * 更新当前服务商的配置
      */
     private fun updateCurrentConfig(update: (ProviderConfig) -> ProviderConfig) {
@@ -267,6 +403,18 @@ class SettingsManager(context: Context) {
         val newConfigs = _settings.value.providerConfigs.toMutableMap()
         newConfigs[currentId] = newConfig
         _settings.value = _settings.value.copy(providerConfigs = newConfigs)
+    }
+
+    private fun updateCurrentVoiceConfig(update: (ProviderConfig) -> ProviderConfig) {
+        val currentId = _settings.value.voiceProviderId
+        val currentConfig = _settings.value.currentVoiceConfig
+        val newConfig = update(currentConfig)
+
+        saveVoiceProviderConfig(currentId, newConfig)
+
+        val newConfigs = _settings.value.voiceProviderConfigs.toMutableMap()
+        newConfigs[currentId] = newConfig
+        _settings.value = _settings.value.copy(voiceProviderConfigs = newConfigs)
     }
 
     fun updateApiKey(apiKey: String) {
@@ -283,6 +431,73 @@ class SettingsManager(context: Context) {
 
     fun updateModel(model: String) {
         updateCurrentConfig { it.copy(model = model) }
+    }
+
+    // -------------------- Voice Agent Settings --------------------
+
+    fun updateVoiceEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean("voice_enabled", enabled).apply()
+        _settings.value = _settings.value.copy(voiceEnabled = enabled)
+    }
+
+    fun selectVoiceProvider(provider: VoiceProvider) {
+        prefs.edit().putString("voice_provider_id", provider.id).apply()
+        _settings.value = _settings.value.copy(voiceProviderId = provider.id)
+    }
+
+    fun updateVoiceApiKey(apiKey: String) {
+        updateCurrentVoiceConfig { it.copy(apiKey = apiKey) }
+    }
+
+    fun updateVoiceBaseUrl(baseUrl: String) {
+        val providerId = _settings.value.voiceProviderId
+        if (providerId == "custom" || _settings.value.currentVoiceProvider.baseUrl.isBlank()) {
+            updateCurrentVoiceConfig { it.copy(customBaseUrl = baseUrl) }
+        }
+    }
+
+    fun updateVoiceModel(model: String) {
+        updateCurrentVoiceConfig { it.copy(model = model) }
+    }
+
+    fun updateBanglishEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean("voice_banglish_enabled", enabled).apply()
+        _settings.value = _settings.value.copy(banglishEnabled = enabled)
+    }
+
+    fun updateIdleCheckinEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean("voice_idle_checkin_enabled", enabled).apply()
+        _settings.value = _settings.value.copy(idleCheckinEnabled = enabled)
+    }
+
+    fun updateIdleCheckinSeconds(seconds: Int) {
+        prefs.edit().putInt("voice_idle_checkin_seconds", seconds).apply()
+        _settings.value = _settings.value.copy(idleCheckinSeconds = seconds)
+    }
+
+    fun updateIdleCheckinMessage(message: String) {
+        prefs.edit().putString("voice_idle_checkin_message", message).apply()
+        _settings.value = _settings.value.copy(idleCheckinMessage = message)
+    }
+
+    fun updateTtsProvider(providerId: String) {
+        prefs.edit().putString("tts_provider_id", providerId).apply()
+        _settings.value = _settings.value.copy(ttsProviderId = providerId)
+    }
+
+    fun updateTtsApiKey(apiKey: String) {
+        securePrefs.edit().putString("tts_api_key", apiKey).apply()
+        _settings.value = _settings.value.copy(ttsApiKey = apiKey)
+    }
+
+    fun updateTtsVoiceId(voiceId: String) {
+        prefs.edit().putString("tts_voice_id", voiceId).apply()
+        _settings.value = _settings.value.copy(ttsVoiceId = voiceId)
+    }
+
+    fun updateTtsBaseUrl(baseUrl: String) {
+        prefs.edit().putString("tts_base_url", baseUrl).apply()
+        _settings.value = _settings.value.copy(ttsBaseUrl = baseUrl)
     }
 
     /**
