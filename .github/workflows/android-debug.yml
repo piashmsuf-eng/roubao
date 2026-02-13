@@ -27,6 +27,32 @@ jobs:
       - name: Configure local.properties
         run: echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
 
+      - name: Create dummy google-services.json
+        run: |
+          cat > app/google-services.json <<'EOF'
+          {
+            "project_info": {
+              "project_number": "000000000000",
+              "project_id": "roubao-debug",
+              "storage_bucket": "roubao-debug.appspot.com"
+            },
+            "client": [
+              {
+                "client_info": {
+                  "mobilesdk_app_id": "1:000000000000:android:0000000000000000",
+                  "android_client_info": {
+                    "package_name": "com.roubao.autopilot"
+                  }
+                },
+                "api_key": [
+                  { "current_key": "dummy" }
+                ]
+              }
+            ],
+            "configuration_version": "1"
+          }
+          EOF
+
       - name: Build debug APK
         run: ./gradlew assembleDebug
 
