@@ -131,7 +131,25 @@ class MainActivity : ComponentActivity() {
         deviceController.setCacheDir(cacheDir)
         settingsManager = SettingsManager(this)
         executionRepository = ExecutionRepository(this)
-        voiceAgent = VoiceAgent(this)
+        voiceAgent = VoiceAgent(
+            this,
+            onTaskRequest = { text ->
+                if (!isExecuting.value) {
+                    runAgent(
+                        instruction = text,
+                        apiKey = settingsManager.settings.value.apiKey,
+                        baseUrl = settingsManager.settings.value.baseUrl,
+                        model = settingsManager.settings.value.model,
+                        maxSteps = settingsManager.settings.value.maxSteps,
+                        isGUIAgent = settingsManager.settings.value.currentProvider.isGUIAgent,
+                        providerId = settingsManager.settings.value.currentProviderId
+                    )
+                }
+            },
+            isTaskAllowed = {
+                shizukuAvailable.value && checkShizukuPermission()
+            }
+        )
 
         // 加载执行记录
         lifecycleScope.launch {

@@ -16,7 +16,11 @@ import org.json.JSONArray
 /**
  * VoiceAgent - Bangla/Banglish voice chat with Jarvis-style responses.
  */
-class VoiceAgent(private val context: Context) {
+class VoiceAgent(
+    private val context: Context,
+    private val onTaskRequest: ((String) -> Unit)? = null,
+    private val isTaskAllowed: (() -> Boolean)? = null
+) {
     companion object {
         private const val TAG = "VoiceAgent"
     }
@@ -97,6 +101,12 @@ class VoiceAgent(private val context: Context) {
     private suspend fun handleUserText(text: String, settings: AppSettings) {
         val normalized = if (settings.banglishEnabled) BanglishParser.normalize(text) else text
 
+        if (shouldTriggerTask(normalized)) {
+            if (isTaskAllowed?.invoke() != false) {
+                onTaskRequest?.invoke(text)
+            }
+        }
+
         val memory = this.memory ?: return
         memory.addUserMessage(normalized)
 
@@ -119,6 +129,15 @@ class VoiceAgent(private val context: Context) {
 
         memory.addAssistantMessage(response)
         ttsEngine.speak(response, settings)
+    }
+
+    private fun shouldTriggerTask(text: String): Boolean {
+        val keywords = listOf(
+            "open", "call", "send", "search", "play", "type", "message", "sms",
+            "whatsapp", "youtube", "chrome", "camera", "settings", "music", "volume",
+            "turn on", "turn off", "click", "scroll", "app"
+        )
+        return keywords.any { text.contains(it) }
     }
 
     private fun startIdleCheckins(settings: AppSettings) {

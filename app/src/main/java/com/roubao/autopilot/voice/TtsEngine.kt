@@ -4,6 +4,7 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.MediaPlayer
+import android.speech.tts.TextToSpeech
 import android.util.Log
 import com.roubao.autopilot.data.AppSettings
 import kotlinx.coroutines.Dispatchers
@@ -14,6 +15,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.File
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 /**
@@ -31,11 +33,15 @@ class TtsEngine(private val context: Context) {
         .writeTimeout(60, TimeUnit.SECONDS)
         .build()
 
+    private var androidTts: TextToSpeech? = null
+    private var ttsReady = false
+
     suspend fun speak(text: String, settings: AppSettings) = withContext(Dispatchers.IO) {
         if (text.isBlank()) return@withContext
         val baseUrl = settings.ttsBaseUrl.trim()
         if (baseUrl.isBlank()) {
-            Log.w(TAG, "TTS base URL not set; skipping audio")
+            Log.w(TAG, "TTS base URL not set; falling back to Android TTS")
+            speakWithAndroidTts(text)
             return@withContext
         }
 
@@ -60,12 +66,28 @@ class TtsEngine(private val context: Context) {
                 val bytes = response.body?.bytes()
                 if (!response.isSuccessful || bytes == null) {
                     Log.w(TAG, "TTS failed: ${response.code}")
+                    speakWithAndroidTts(text)
                     return@withContext
                 }
                 playAudio(bytes)
             }
         } catch (e: Exception) {
             Log.e(TAG, "TTS error", e)
+            speakWithAndroidTts(text)
+        }
+    }
+
+    private fun speakWithAndroidTts(text: String) {
+        if (androidTts == null) {
+            androidTts = TextToSpeech(context) { status ->
+                ttsReady = status == TextToSpeech.SUCCESS
+                if (ttsReady) {
+                    androidTts?.language = Locale("bn", "BD")
+                    androidTts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "roubao_tts")
+                }
+            }
+        } else if (ttsReady) {
+            androidTts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "roubao_tts")
         }
     }
 
