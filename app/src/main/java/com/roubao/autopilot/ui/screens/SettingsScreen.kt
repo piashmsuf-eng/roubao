@@ -1524,7 +1524,7 @@ fun ModelSelectDialogWithFetch(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = if (hasApiKey) "Click "Fetch from API" to load models" else "Please set API key first",
+                            text = if (hasApiKey) "Click \"Fetch from API\" to load models" else "Please set API key first",
                             fontSize = 13.sp,
                             color = colors.textHint
                         )
@@ -1537,7 +1537,7 @@ fun ModelSelectDialogWithFetch(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "No models matching "$searchQuery"",
+                            text = "No models matching \"$searchQuery\"",
                             fontSize = 13.sp,
                             color = colors.textHint
                         )
@@ -1712,7 +1712,7 @@ fun OverlayHelpDialog(onDismiss: () -> Unit) {
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = "1. You will be prompted when starting a task\n2. Or go to: Settings > Apps > Roubao > Overlay permission\n3. Enable "Display over other apps"",
+                    text = "1. You will be prompted when starting a task\n2. Or go to: Settings > Apps > Roubao > Overlay permission\n3. Enable \"Display over other apps\"",
                     fontSize = 14.sp,
                     color = colors.textPrimary,
                     lineHeight = 22.sp
